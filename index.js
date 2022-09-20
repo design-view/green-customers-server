@@ -1,10 +1,20 @@
 const express = require("express");
 const cors = require("cors");
 const app = express();
+const path = require("path");
 const port = process.env.PORT || 3001;
 const mysql = require("mysql");
 const fs = require("fs")
+const bcrypt = require('bcrypt');
+const saltRounds = 10;
+app.use(express.static("public"));
 const dbinfo = fs.readFileSync('./database.json');
+const multer = require("multer")
+
+let jwt = require("jsonwebtoken");
+let secretObj = require('./ignorefile/jwt');
+var storage = multer.memoryStorage()
+var upload = multer({ storage: storage })
 //받아온 json데이터를 객체형태로 변경 JSON.parse
 const conf = JSON.parse(dbinfo)
 const connection = mysql.createConnection({
@@ -16,6 +26,34 @@ const connection = mysql.createConnection({
 })
 app.use(express.json());
 app.use(cors());
+app.use("/upload", express.static("upload"));
+
+//파일요청시 파일이 저장될 경로와 파일이름(요청된 원본파일이름) 지정
+storage = multer.diskStorage({
+    destination: "./upload/",
+    filename: function(req, file, cb){
+        let num = file.originalname.lastIndexOf(".");
+        let re = file.originalname.substring(num);
+        let imgname = String(Date.now())+re;
+        cb(null, `${imgname}`);
+    }
+})
+
+// 업로드객체 
+upload = multer({
+    storage:storage,
+    limits: { fieldSize: 1000000 }
+})
+
+// upload경로로 포스트 요청이 왔을때 응답
+app.post("/upload", upload.single("img"), function(req, res, next){
+    res.send({
+        imageUrl: req.file.filename
+    });
+})
+
+
+
 
 // app.get("경로", 함수)
 // connection.query("쿼리문", 함수)
@@ -93,8 +131,79 @@ app.put('/editcustomer/:no', async (req, res)=>{
         res.send(result)
     })
 })
+//테스트
+app.post("/aaa",async (req, res)=>{
+    console.log(req.body);
+    res.send(req.body);
+})
+//회원가입 요청
+app.post("/join", async (req, res)=>{
+    let myPlanintextPass = req.body.userpass;
+    let myPass = "";
+    if(myPlanintextPass != ''  &&  myPlanintextPass != undefined){
+        bcrypt.genSalt(saltRounds, function(err, salt) {
+            bcrypt.hash(myPlanintextPass, salt, function(err, hash) {
+                // Store hash in your password DB.
+                myPass = hash;
+                console.log(myPass);
+                //쿼리작성
+                const {username, userphone, userorg, usermail} = req.body;
+                connection.query("insert into customer_members(username, userpass, userphone, userorg,usermail, regdate) values(?,?,?,?,?,DATE_FORMAT(now(),'%Y-%m-%d'))",
+                    [username, myPass, userphone, userorg, usermail],
+                    (err, result, fields) => {
+                        console.log(result)
+                        console.log(err)
+                        res.send("등록되었습니다.")
+                    }
+                )
+            });
+        });
+    }
+})
 
+// 로그인 요청
+app.post('/login', async (req, res) => {
+    // usermail값에 일치하는 데이터가 있는지 select문 1234 -> #dfwew2rE
+    // userpass 암호화 해서 쿼리 결과의 패스워드랑 일치하는지를 체크
+    const { usermail, userpass } = req.body;
+    connection.query(`select * from customer_members where usermail = '${usermail}'`,
+        (err, rows, fields)=>{
+            if(rows != undefined){
+                if(rows[0] == undefined){
+                    res.send("실패")
+                }else {
+                    bcrypt.compare(userpass, rows[0].userpass, function(err, result) {
+                        // result == true
+                        if(result == true){
+                            res.send(rows[0])
+                        }else {
+                            res.send("실패")
+                        }
+                    });
+                }
+            }else {
+                res.send("실패")
+            }
+        }
+    )
+})
 
+//  gallery 포스트 요청시
+app.post("/gallery", async (req, res) => {
+    const { usermail, title, imgurl, desc } = req.body;
+    connection.query("insert into customer_gallery(`title`,`imgurl`,`desc`,`usermail`) values(?,?,?,?)",
+    [title, imgurl, desc, usermail] ,
+    (err, result, fields)=>{
+        res.send("등록되었습니다.")
+    })
+})
+// gallelry 겟 요청시 
+app.get("/gallery", async (req, res) => {
+    connection.query("select * from customer_gallery",
+    (err, result, fields)=>{
+        res.send(result)
+    })
+})
 
 
 //서버실행
